@@ -1,0 +1,476 @@
+name: APK derle
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Proje dosyalarini olustur
+        run: |
+          mkdir -p app/src/main/java/com/alpai/assistant/ai
+          mkdir -p app/src/main/java/com/alpai/assistant/voice
+          mkdir -p app/src/main/java/com/alpai/assistant/commands
+          mkdir -p app/src/main/java/com/alpai/assistant/ui
+          mkdir -p app/src/main/res/values
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "ALPAI"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          import java.util.Properties
+
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          val localProps = Properties().apply {
+              val f = rootProject.file("local.properties")
+              if (f.exists()) f.inputStream().use { load(it) }
+          }
+
+          android {
+              namespace = "com.alpai.assistant"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.alpai.assistant"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "0.2.0"
+
+                  buildConfigField("String", "GEMINI_API_KEY", "\"${localProps.getProperty("GEMINI_API_KEY", "")}\"")
+                  buildConfigField("String", "GEMINI_MODEL", "\"${localProps.getProperty("GEMINI_MODEL", "gemini-2.5-flash")}\"")
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+              buildFeatures {
+                  compose = true
+                  buildConfig = true
+              }
+              composeOptions {
+                  kotlinCompilerExtensionVersion = "1.5.14"
+              }
+              packaging {
+                  resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+              }
+          }
+
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.activity:activity-compose:1.9.0")
+              implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
+              implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.3")
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.foundation:foundation")
+              implementation("androidx.compose.material3:material3")
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
+              <uses-feature android:name="android.hardware.camera" android:required="false" />
+              <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+              <queries>
+                  <intent>
+                      <action android:name="android.speech.RecognitionService" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent>
+              </queries>
+
+              <application
+                  android:allowBackup="false"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.Alpai">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">ALPAI</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+              <style name="Theme.Alpai" parent="android:Theme.DeviceDefault.NoActionBar" />
+          </resources>
+          EOF
+
+          cat > app/src/main/java/com/alpai/assistant/MainActivity.kt <<'EOF'
+          package com.alpai.assistant
+
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.activity.enableEdgeToEdge
+          import androidx.activity.viewModels
+          import com.alpai.assistant.ui.AlpaiTheme
+          import com.alpai.assistant.ui.MainScreen
+
+          class MainActivity : ComponentActivity() {
+              private val vm: ChatViewModel by viewModels()
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  enableEdgeToEdge()
+                  super.onCreate(savedInstanceState)
+                  setContent {
+                      AlpaiTheme {
+                          MainScreen(vm)
+                      }
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/alpai/assistant/Store.kt <<'EOF'
+          package com.alpai.assistant
+
+          import android.content.Context
+          import org.json.JSONArray
+          import org.json.JSONObject
+
+          class Store(context: Context) {
+              private val sp = context.getSharedPreferences("alpai", Context.MODE_PRIVATE)
+
+              var persona: Int
+                  get() = sp.getInt("persona", 0)
+                  set(v) { sp.edit().putInt("persona", v).apply() }
+
+              fun memories(): List<String> {
+                  val arr = JSONArray(sp.getString("memories", "[]"))
+                  return List(arr.length()) { arr.getString(it) }
+              }
+
+              private fun saveMemories(list: List<String>) {
+                  sp.edit().putString("memories", JSONArray(list).toString()).apply()
+              }
+
+              fun addMemory(text: String) = saveMemories((memories() + text).takeLast(50))
+
+              fun removeMemory(index: Int) {
+                  val l = memories().toMutableList()
+                  if (index in l.indices) { l.removeAt(index); saveMemories(l) }
+              }
+
+              fun clearMemories() = saveMemories(emptyList())
+
+              fun loadChat(): List<ChatMessage> = try {
+                  val arr = JSONArray(sp.getString("chat", "[]"))
+                  List(arr.length()) {
+                      val o = arr.getJSONObject(it)
+                      ChatMessage(o.getLong("id"), o.getBoolean("u"), o.getString("t"))
+                  }
+              } catch (e: Exception) { emptyList() }
+
+              fun saveChat(list: List<ChatMessage>) {
+                  val arr = JSONArray()
+                  list.takeLast(100).forEach {
+                      arr.put(JSONObject().put("id", it.id).put("u", it.fromUser).put("t", it.text))
+                  }
+                  sp.edit().putString("chat", arr.toString()).apply()
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/alpai/assistant/ChatViewModel.kt <<'EOF'
+          package com.alpai.assistant
+
+          import android.app.Application
+          import android.graphics.Bitmap
+          import android.graphics.BitmapFactory
+          import android.net.ConnectivityManager
+          import android.net.Network
+          import android.net.Uri
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.viewModelScope
+          import com.alpai.assistant.ai.AlpaiException
+          import com.alpai.assistant.ai.GeminiClient
+          import com.alpai.assistant.commands.CommandManager
+          import com.alpai.assistant.voice.SpeechInput
+          import com.alpai.assistant.voice.SpeechOutput
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.flow.MutableStateFlow
+          import kotlinx.coroutines.flow.StateFlow
+          import kotlinx.coroutines.flow.asStateFlow
+          import kotlinx.coroutines.launch
+          import kotlinx.coroutines.withContext
+          import java.io.ByteArrayOutputStream
+          import kotlin.math.max
+
+          enum class AssistantState { IDLE, LISTENING, THINKING, SPEAKING }
+
+          data class ChatMessage(val id: Long, val fromUser: Boolean, val text: String)
+
+          val PersonaNames = listOf(
+              "Standart asistan", "Samimi arkadaş", "Profesyonel asistan", "Öğretmen", "Eğlenceli ve esprili asistan"
+          )
+          private val PersonaPrompts = listOf(
+              "Dengeli, net ve yardımsever ol.",
+              "Samimi, sıcak bir arkadaş gibi konuş; kullanıcıya sen diye hitap et.",
+              "Resmi, düzenli ve profesyonel bir dille konuş.",
+              "Bir öğretmen gibi adım adım, sade ve örneklerle açıkla.",
+              "Eğlenceli ve esprili ol ama bilgiyi doğru ver."
+          )
+
+          class ChatViewModel(app: Application) : AndroidViewModel(app) {
+
+              private val store = Store(app)
+
+              private val _messages = MutableStateFlow(store.loadChat())
+              val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+
+              private val _state = MutableStateFlow(AssistantState.IDLE)
+              val state: StateFlow<AssistantState> = _state.asStateFlow()
+
+              private val _partial = MutableStateFlow("")
+              val partial: StateFlow<String> = _partial.asStateFlow()
+
+              private val _error = MutableStateFlow<String?>(null)
+              val error: StateFlow<String?> = _error.asStateFlow()
+
+              private val _online = MutableStateFlow(true)
+              val online: StateFlow<Boolean> = _online.asStateFlow()
+
+              private val _persona = MutableStateFlow(store.persona.coerceIn(PersonaNames.indices))
+              val persona: StateFlow<Int> = _persona.asStateFlow()
+
+              private val _memories = MutableStateFlow(store.memories())
+              val memories: StateFlow<List<String>> = _memories.asStateFlow()
+
+              private var nextId = (_messages.value.maxOfOrNull { it.id } ?: -1L) + 1
+              private val commands = CommandManager(app, store)
+
+              private val speechOutput = SpeechOutput(app) {
+                  if (_state.value == AssistantState.SPEAKING) _state.value = AssistantState.IDLE
+              }
+
+              private val speechInput = SpeechInput(
+                  app,
+                  onPartial = { _partial.value = it },
+                  onResult = { _partial.value = ""; send(it) },
+                  onFinishedWithoutResult = { msg ->
+                      _partial.value = ""
+                      _state.value = AssistantState.IDLE
+                      _error.value = msg
+                  }
+              )
+
+              private val cm = app.getSystemService(ConnectivityManager::class.java)
+              private val netCallback = object : ConnectivityManager.NetworkCallback() {
+                  override fun onAvailable(network: Network) { _online.value = true }
+                  override fun onLost(network: Network) { _online.value = false }
+              }
+
+              init {
+                  _online.value = cm.activeNetwork != null
+                  cm.registerDefaultNetworkCallback(netCallback)
+              }
+
+              fun toggleListening() {
+                  if (_state.value == AssistantState.LISTENING) {
+                      speechInput.stop()
+                      _partial.value = ""
+                      _state.value = AssistantState.IDLE
+                      return
+                  }
+                  if (_state.value == AssistantState.THINKING) return
+                  speechOutput.stop()
+                  _error.value = null
+                  _state.value = AssistantState.LISTENING
+                  speechInput.start()
+              }
+
+              fun send(text: String) {
+                  val msg = text.trim()
+                  if (msg.isEmpty() || _state.value == AssistantState.THINKING) return
+                  beginTurn()
+                  addMessage(true, msg)
+
+                  val local = commands.handle(msg)
+                  _memories.value = store.memories()
+                  if (local != null) { reply(local); return }
+
+                  if (!canCallApi()) return
+                  askGemini(historyTurns(), null)
+              }
+
+              fun sendBitmap(bitmap: Bitmap, prompt: String) {
+                  if (_state.value == AssistantState.THINKING) return
+                  beginTurn()
+                  sendImage(bitmap, prompt)
+              }
+
+              fun sendImageUri(uri: Uri, prompt: String) {
+                  if (_state.value == AssistantState.THINKING) return
+                  beginTurn()
+                  _state.value = AssistantState.THINKING
+                  viewModelScope.launch {
+                      val bmp = withContext(Dispatchers.IO) { decode(uri) }
+                      if (bmp == null) {
+                          _state.value = AssistantState.IDLE
+                          _error.value = "Fotoğraf açılamadı."
+                      } else {
+                          sendImage(bmp, prompt)
+                      }
+                  }
+              }
+
+              private fun sendImage(bitmap: Bitmap, prompt: String) {
+                  val q = prompt.trim().ifEmpty {
+                      "Bu fotoğrafta ne var? Nesneleri, yazıları ve sahneyi Türkçe, kısaca açıkla."
+                  }
+                  addMessage(true, if (prompt.isBlank()) "📷 Fotoğraf gönderildi" else "📷 $q")
+                  if (!canCallApi()) return
+                  val history = historyTurns(dropLast = true)
+                  askGemini(history, q, bitmap)
+              }
+
+              private fun decode(uri: Uri): Bitmap? = runCatching {
+                  val cr = getApplication<Application>().contentResolver
+                  val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                  cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                  var sample = 1
+                  while (max(bounds.outWidth, bounds.outHeight) / sample > 2048) sample *= 2
+                  cr.openInputStream(uri)?.use {
+                      BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                  }
+              }.getOrNull()
+
+              private fun toJpeg(src: Bitmap): ByteArray {
+                  val maxSide = 1024f
+                  val scale = minOf(1f, maxSide / max(src.width, src.height))
+                  val bmp = if (scale < 1f)
+                      Bitmap.createScaledBitmap(src, (src.width * scale).toInt(), (src.height * scale).toInt(), true)
+                  else src
+                  return ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
+              }
+
+              private fun beginTurn() {
+                  speechOutput.stop()
+                  speechInput.stop()
+                  _error.value = null
+                  _partial.value = ""
+              }
+
+              private fun canCallApi(): Boolean {
+                  if (BuildConfig.GEMINI_API_KEY.isBlank()) {
+                      reply("Gemini API anahtarı bulunamadı. Depodaki GEMINI_API_KEY gizli anahtarını ekleyip uygulamayı yeniden derle.")
+                      return false
+                  }
+                  if (!_online.value) {
+                      _state.value = AssistantState.IDLE
+                      _error.value = "İnternet bağlantısı yok."
+                      return false
+                  }
+                  return true
+              }
+
+              private fun historyTurns(dropLast: Boolean = false): List<GeminiClient.Turn> {
+                  var l = _messages.value.takeLast(21)
+                  if (dropLast) l = l.dropLast(1)
+                  return l.takeLast(20)
+                      .map { GeminiClient.Turn(if (it.fromUser) "user" else "model", it.text) }
+                      .dropWhile { it.role != "user" }
+              }
+
+              private fun askGemini(history: List<GeminiClient.Turn>, imagePrompt: String?, bitmap: Bitmap? = null) {
+                  _state.value = AssistantState.THINKING
+                  viewModelScope.launch {
+                      try {
+                          val turns = if (imagePrompt != null && bitmap != null) {
+                              val jpg = withContext(Dispatchers.Default) { toJpeg(bitmap) }
+                              history + GeminiClient.Turn("user", imagePrompt, jpg)
+                          } else history
+                          reply(GeminiClient.chat(turns, systemPrompt()))
+                      } catch (e: AlpaiException) {
+                          _state.value = AssistantState.IDLE
+                          _error.value = e.message
+                      } catch (e: Exception) {
+                          _state.value = AssistantState.IDLE
+                          _error.value = "Beklenmeyen bir hata oluştu."
+                      }
+                  }
+              }
+
+              private fun systemPrompt(): String {
+                  val mem = store.memories()
+                  return "Sen ALPAI adlı, Türkçe konuşan, hızlı ve yardımsever bir mobil sesli asistansın. " +
+                      PersonaPrompts[_persona.value] + " " +
+                      "Yanıtların sesli okunacağı için kısa ve doğal olsun; markdown, madde işareti veya emoji kullanma. " +
+                      "Telefonda bir işlem yaptığını ya da yapabildiğini iddia etme; bilmediğin şeyi dürüstçe söyle." +
+                      if (mem.isEmpty()) "" else " Kullanıcının kaydetmeni istediği bilgiler: " + mem.joinToString("; ") + "."
+              }
+
+              fun setPersona(i: Int) { store.persona = i; _persona.value = i }
+              fun deleteMemory(i: Int) { store.removeMemory(i); _memories.value = store.memories() }
+              fun clearMemories() { store.cle
